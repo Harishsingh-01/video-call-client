@@ -20,19 +20,34 @@ const VideoCall = () => {
     });
 
     socket.on("signal", async (data) => {
-      if (!peerRef.current) setupPeer();
-
-      if (data.type === "offer") {
-        await peerRef.current.setRemoteDescription(new RTCSessionDescription(data.offer));
-        const answer = await peerRef.current.createAnswer();
-        await peerRef.current.setLocalDescription(answer);
-        socket.emit("signal", { room: roomId, answer });
-      } else if (data.type === "answer") {
-        await peerRef.current.setRemoteDescription(new RTCSessionDescription(data.answer));
-      } else if (data.candidate) {
-        await peerRef.current.addIceCandidate(new RTCIceCandidate(data.candidate));
-      }
-    });
+        if (!peerRef.current) setupPeer(); // Ensure peer connection is initialized
+      
+        try {
+          if (data.type === "offer") {
+            console.log("Received Offer:", data.offer.sdp);
+            
+            // Ensure correct media line order
+            if (peerRef.current.signalingState !== "stable") {
+              console.warn("Ignoring offer as signaling state is not stable:", peerRef.current.signalingState);
+              return;
+            }
+      
+            await peerRef.current.setRemoteDescription(new RTCSessionDescription(data.offer));
+            const answer = await peerRef.current.createAnswer();
+            await peerRef.current.setLocalDescription(answer);
+            socket.emit("signal", { room: roomId, answer });
+          } 
+          else if (data.type === "answer") {
+            await peerRef.current.setRemoteDescription(new RTCSessionDescription(data.answer));
+          } 
+          else if (data.candidate) {
+            await peerRef.current.addIceCandidate(new RTCIceCandidate(data.candidate));
+          }
+        } catch (error) {
+          console.error("Error handling WebRTC signal:", error);
+        }
+      });
+      
 
     return () => {
       socket.disconnect();
