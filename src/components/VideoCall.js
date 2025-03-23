@@ -19,67 +19,43 @@ const VideoCall = () => {
 
   // Handle socket connections and signaling
   useEffect(() => {
-    console.log('Socket connection status:', socket.connected);
-
-    socket.on("connect", () => {
-      console.log("Socket connected successfully");
-    });
-
-    socket.on("connect_error", (error) => {
-      console.error("Socket connection error:", error);
-    });
-
+    // Listen for new user connections
     socket.on("user-connected", (userId) => {
-      console.log(`User ${userId} joined the room. Initiating call...`);
+      console.log(`User ${userId} joined the room`);
       callUser(userId);
     });
 
+    // Handle WebRTC signaling
     socket.on("signal", async (data) => {
-      console.log("Received signal:", data.type || "ICE candidate");
-      
-      if (!peerRef.current) {
-        console.log("Setting up new peer connection...");
-        setupPeer();
-      }
+      if (!peerRef.current) setupPeer();
 
       try {
         if (data.type === "offer") {
-          console.log("Processing offer...");
+          // Handle incoming call offer
           await peerRef.current.setRemoteDescription(new RTCSessionDescription(data.offer));
-          console.log("Created remote description");
-          
           const answer = await peerRef.current.createAnswer();
-          console.log("Created answer");
-          
           await peerRef.current.setLocalDescription(answer);
-          console.log("Set local description");
-          
           socket.emit("signal", { room: roomId, answer });
-          console.log("Sent answer to peer");
         } else if (data.type === "answer") {
-          console.log("Processing answer...");
+          // Handle call answer
           await peerRef.current.setRemoteDescription(new RTCSessionDescription(data.answer));
-          console.log("Set remote description from answer");
         } else if (data.candidate) {
-          console.log("Processing ICE candidate...");
+          // Handle ICE candidates
           await peerRef.current.addIceCandidate(new RTCIceCandidate(data.candidate));
-          console.log("Added ICE candidate");
         }
       } catch (error) {
-        console.error("Signal processing error:", error);
+        console.error("Signal error:", error);
       }
     });
 
     // Cleanup on unmount
     return () => {
-      console.log("Cleaning up socket connection...");
       socket.disconnect();
     };
   }, [roomId]);
 
   // Setup WebRTC peer connection
   const setupPeer = () => {
-    console.log("Setting up peer connection...");
     const peer = new RTCPeerConnection({
       iceServers: [
         { urls: "stun:stun.l.google.com:19302" },
@@ -87,95 +63,66 @@ const VideoCall = () => {
       ],
     });
 
-    peer.oniceconnectionstatechange = () => {
-      console.log("ICE Connection State:", peer.iceConnectionState);
-    };
-
-    peer.onconnectionstatechange = () => {
-      console.log("Connection State:", peer.connectionState);
-    };
-
+    // Handle incoming video/audio streams
     peer.ontrack = (event) => {
-      console.log("Received remote track:", event.streams[0].getTracks());
       if (remoteVideoRef.current) {
         remoteVideoRef.current.srcObject = event.streams[0];
-        console.log("Set remote video stream");
       }
     };
 
+    // Handle ICE candidates
     peer.onicecandidate = (event) => {
       if (event.candidate) {
-        console.log("Generated ICE candidate");
         socket.emit("signal", { room: roomId, candidate: event.candidate });
-        console.log("Sent ICE candidate to peer");
       }
     };
 
     peerRef.current = peer;
-    console.log("Peer connection setup complete");
   };
 
   // Initiate call to another user
   const callUser = async (userId) => {
-    console.log("Initiating call to user:", userId);
-    
-    if (!peerRef.current) {
-      console.log("Setting up peer connection for call...");
-      setupPeer();
-    }
+    if (!peerRef.current) setupPeer();
 
     try {
-      console.log("Creating offer...");
       const offer = await peerRef.current.createOffer();
-      console.log("Setting local description...");
       await peerRef.current.setLocalDescription(offer);
-      console.log("Sending offer to peer...");
       socket.emit("signal", { room: roomId, offer });
     } catch (error) {
-      console.error("Error during call initiation:", error);
+      console.error("Error creating offer:", error);
     }
   };
 
   // Get camera and microphone stream
   const getMediaStream = (facingMode = "user") => {
-    console.log("Getting media stream with facing mode:", facingMode);
-    
     navigator.mediaDevices.getUserMedia({ 
       video: { facingMode },
       audio: true 
     })
     .then((userStream) => {
-      console.log("Got media stream:", userStream.getTracks());
       setStream(userStream);
-      
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = userStream;
-        console.log("Set local video stream");
       }
-      
+      // Add tracks to peer connection if it exists
       if (peerRef.current) {
-        console.log("Adding tracks to peer connection...");
         userStream.getTracks().forEach((track) => {
           peerRef.current.addTrack(track, userStream);
-          console.log("Added track:", track.kind);
         });
       }
     })
     .catch((err) => {
-      console.error("Media stream error:", err);
+      console.error("Error accessing media devices:", err);
       alert("Unable to access camera/microphone. Please check permissions.");
     });
   };
 
   // Switch between front and back cameras
   const switchCamera = () => {
-    console.log("Switching camera...");
     if (stream) {
-      console.log("Stopping current tracks...");
       stream.getTracks().forEach(track => track.stop());
     }
     const newCamera = currentCamera === "user" ? "environment" : "user";
-    console.log("Switching to camera mode:", newCamera);
     setCurrentCamera(newCamera);
     getMediaStream(newCamera);
   };
@@ -183,7 +130,6 @@ const VideoCall = () => {
   // Create a new room
   const createRoom = () => {
     const newRoomId = Math.random().toString(36).substring(2, 10);
-    console.log("Creating new room:", newRoomId);
     setRoomId(newRoomId);
     socket.emit("join-room", newRoomId);
     setJoinedRoom(true);
@@ -193,13 +139,11 @@ const VideoCall = () => {
   // Join an existing room
   const joinRoom = () => {
     if (inputRoom) {
-      console.log("Joining room:", inputRoom);
       setRoomId(inputRoom);
       socket.emit("join-room", inputRoom);
       setJoinedRoom(true);
       getMediaStream();
     } else {
-      console.warn("No room code entered");
       alert("Please enter a room code");
     }
   };
