@@ -38,25 +38,42 @@ const VideoCall = () => {
 
   // Handle room-specific socket events
   useEffect(() => {
-    if (!roomId) return; // Don't set up room handlers if no roomId
+    if (!roomId) return;
 
     console.log(`Setting up room handlers for room: ${roomId}`);
 
-    socket.on("user-connected", (userId) => {
-      console.log(`User ${userId} joined the room. Initiating call...`);
-      callUser(userId);
+    // Add this to track room joining confirmation
+    socket.on("room-joined", (data) => {
+      console.log("Successfully joined room:", data);
     });
 
+    socket.on("user-connected", (userId) => {
+      console.log(`User ${userId} joined the room. Initiating call...`);
+      // Add delay to ensure peer setup is complete
+      setTimeout(() => {
+        callUser(userId);
+      }, 1000);
+    });
+
+    // Update signal handler
     socket.on("signal", async (data) => {
-      console.log("Received signal:", data.type || "ICE candidate");
+      console.log("Received signal:", data);
       
       if (!peerRef.current) {
         console.log("Setting up new peer connection...");
         setupPeer();
+        
+        // If we have a stream, add tracks to the new peer
+        if (stream) {
+          console.log("Adding existing tracks to new peer connection");
+          stream.getTracks().forEach((track) => {
+            peerRef.current.addTrack(track, stream);
+          });
+        }
       }
 
       try {
-        if (data.type === "offer") {
+        if (data.offer) {
           console.log("Processing offer...");
           await peerRef.current.setRemoteDescription(new RTCSessionDescription(data.offer));
           console.log("Created remote description");
@@ -67,9 +84,14 @@ const VideoCall = () => {
           await peerRef.current.setLocalDescription(answer);
           console.log("Set local description");
           
-          socket.emit("signal", { room: roomId, answer });
+          socket.emit("signal", { 
+            room: roomId,
+            to: data.from, // Add this
+            type: "answer",
+            answer 
+          });
           console.log("Sent answer to peer");
-        } else if (data.type === "answer") {
+        } else if (data.answer) {
           console.log("Processing answer...");
           await peerRef.current.setRemoteDescription(new RTCSessionDescription(data.answer));
           console.log("Set remote description from answer");
@@ -83,13 +105,19 @@ const VideoCall = () => {
       }
     });
 
-    // Cleanup only room-specific handlers
+    // Add this to track when users leave
+    socket.on("user-disconnected", (userId) => {
+      console.log(`User ${userId} left the room`);
+    });
+
     return () => {
       console.log(`Cleaning up room handlers for room: ${roomId}`);
+      socket.off("room-joined");
       socket.off("user-connected");
+      socket.off("user-disconnected");
       socket.off("signal");
     };
-  }, [roomId]);
+  }, [roomId, stream]); // Add stream to dependencies
 
   // Setup WebRTC peer connection
   const setupPeer = () => {
@@ -97,7 +125,12 @@ const VideoCall = () => {
     const peer = new RTCPeerConnection({
       iceServers: [
         { urls: "stun:stun.l.google.com:19302" },
-        { urls: "stun:stun1.l.google.com:19302" }
+        { urls: "stun:stun1.l.google.com:19302" },
+        {
+          urls: 'turn:numb.viagenie.ca',
+          credential: 'muazkh',
+          username: 'webrtc@live.com'
+        }
       ],
     });
 
@@ -107,6 +140,21 @@ const VideoCall = () => {
 
     peer.onconnectionstatechange = () => {
       console.log("Connection State:", peer.connectionState);
+    };
+
+    peer.onnegotiationneeded = async () => {
+      console.log("Negotiation needed");
+      try {
+        const offer = await peer.createOffer();
+        await peer.setLocalDescription(offer);
+        socket.emit("signal", { 
+          room: roomId, 
+          type: "offer",
+          offer 
+        });
+      } catch (err) {
+        console.error("Error during negotiation:", err);
+      }
     };
 
     peer.ontrack = (event) => {
@@ -120,7 +168,11 @@ const VideoCall = () => {
     peer.onicecandidate = (event) => {
       if (event.candidate) {
         console.log("Generated ICE candidate");
-        socket.emit("signal", { room: roomId, candidate: event.candidate });
+        socket.emit("signal", { 
+          room: roomId,
+          type: "candidate",
+          candidate: event.candidate 
+        });
         console.log("Sent ICE candidate to peer");
       }
     };
@@ -138,13 +190,26 @@ const VideoCall = () => {
       setupPeer();
     }
 
+    // Add tracks if we have a stream
+    if (stream) {
+      console.log("Adding tracks to peer connection");
+      stream.getTracks().forEach((track) => {
+        peerRef.current.addTrack(track, stream);
+      });
+    }
+
     try {
       console.log("Creating offer...");
       const offer = await peerRef.current.createOffer();
       console.log("Setting local description...");
       await peerRef.current.setLocalDescription(offer);
       console.log("Sending offer to peer...");
-      socket.emit("signal", { room: roomId, offer });
+      socket.emit("signal", { 
+        room: roomId,
+        to: userId, // Add this
+        type: "offer",
+        offer 
+      });
     } catch (error) {
       console.error("Error during call initiation:", error);
     }
