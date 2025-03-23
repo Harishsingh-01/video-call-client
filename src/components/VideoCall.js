@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
 
-const socket = io("https://8f47-152-59-97-84.ngrok-free.app", {
+const socket = io("https://video-call-server-hrml.onrender.com", {
   transports: ["websocket", "polling"],
   withCredentials: true
 });
