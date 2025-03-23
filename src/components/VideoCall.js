@@ -5,13 +5,13 @@ const socket = io("https://video-call-server-hrml.onrender.com"); // Use your Cl
 
 const VideoCall = () => {
   const localVideoRef = useRef(null);
+  const remoteVideoRef = useRef(null);
+  const peerRef = useRef(null);
   const [stream, setStream] = useState(null);
   const [roomId, setRoomId] = useState("");
   const [joinedRoom, setJoinedRoom] = useState(false);
   const [inputRoom, setInputRoom] = useState("");
-  const [currentCamera, setCurrentCamera] = useState("user");
-  const peersRef = useRef({}); // Store multiple peer connections
-  const videoRefs = useRef({}); // Store video refs for remote users
+  const [currentCamera, setCurrentCamera] = useState("user"); // Default: Front Camera
 
   useEffect(() => {
     socket.on("user-connected", (userId) => {
@@ -19,86 +19,103 @@ const VideoCall = () => {
       callUser(userId);
     });
 
-    socket.on("signal", async ({ senderId, signal }) => {
-      if (!peersRef.current[senderId]) {
-        setupPeer(senderId);
-      }
-
-      try {
-        if (signal.type === "offer") {
-          await peersRef.current[senderId].setRemoteDescription(new RTCSessionDescription(signal));
-          const answer = await peersRef.current[senderId].createAnswer();
-          await peersRef.current[senderId].setLocalDescription(answer);
-          socket.emit("signal", { room: roomId, senderId: socket.id, signal: answer });
-        } else if (signal.type === "answer") {
-          await peersRef.current[senderId].setRemoteDescription(new RTCSessionDescription(signal));
-        } else if (signal.candidate) {
-          await peersRef.current[senderId].addIceCandidate(new RTCIceCandidate(signal));
+    socket.on("signal", async (data) => {
+        if (!peerRef.current) setupPeer(); // Ensure peer connection is initialized
+      
+        try {
+          if (data.type === "offer") {
+            console.log("Received Offer:", data.offer.sdp);
+            
+            // Ensure correct media line order
+            if (peerRef.current.signalingState !== "stable") {
+              console.warn("Ignoring offer as signaling state is not stable:", peerRef.current.signalingState);
+              return;
+            }
+      
+            await peerRef.current.setRemoteDescription(new RTCSessionDescription(data.offer));
+            const answer = await peerRef.current.createAnswer();
+            await peerRef.current.setLocalDescription(answer);
+            socket.emit("signal", { room: roomId, answer });
+          } 
+          else if (data.type === "answer") {
+            await peerRef.current.setRemoteDescription(new RTCSessionDescription(data.answer));
+          } 
+          else if (data.candidate) {
+            await peerRef.current.addIceCandidate(new RTCIceCandidate(data.candidate));
+          }
+        } catch (error) {
+          console.error("Error handling WebRTC signal:", error);
         }
-      } catch (error) {
-        console.error("Error handling WebRTC signal:", error);
-      }
-    });
+      });
+      
 
     return () => {
       socket.disconnect();
     };
   }, [roomId]);
 
-  const setupPeer = (userId) => {
+  const setupPeer = () => {
     const peer = new RTCPeerConnection({
       iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
     });
 
     peer.ontrack = (event) => {
-      if (!videoRefs.current[userId]) {
-        videoRefs.current[userId] = document.createElement("video");
-        videoRefs.current[userId].autoPlay = true;
-        videoRefs.current[userId].playsInline = true;
-        videoRefs.current[userId].classList.add("w-1/2", "border", "border-gray-700");
-        document.getElementById("remote-videos").appendChild(videoRefs.current[userId]);
+      if (remoteVideoRef.current) {
+        remoteVideoRef.current.srcObject = event.streams[0];
       }
-      videoRefs.current[userId].srcObject = event.streams[0];
     };
 
     peer.onicecandidate = (event) => {
       if (event.candidate) {
-        socket.emit("signal", { room: roomId, senderId: socket.id, signal: event.candidate });
+        socket.emit("signal", { room: roomId, candidate: event.candidate });
       }
     };
 
-    stream?.getTracks().forEach((track) => peer.addTrack(track, stream));
-
-    peersRef.current[userId] = peer;
+    peerRef.current = peer;
   };
 
   const callUser = async (userId) => {
-    if (!peersRef.current[userId]) setupPeer(userId);
+    if (!peerRef.current) setupPeer();
 
-    const offer = await peersRef.current[userId].createOffer();
-    await peersRef.current[userId].setLocalDescription(offer);
+    const offer = await peerRef.current.createOffer();
+    await peerRef.current.setLocalDescription(offer);
 
-    socket.emit("signal", { room: roomId, senderId: socket.id, signal: offer });
+    socket.emit("signal", { room: roomId, offer });
   };
-
   const getMediaStream = () => {
-    navigator.mediaDevices.getUserMedia({
-      video: { facingMode: currentCamera },
-      audio: true,
-    })
-    .then((userStream) => {
-      setStream(userStream);
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = userStream;
+    navigator.mediaDevices.enumerateDevices().then((devices) => {
+      const videoDevices = devices.filter(device => device.kind === "videoinput");
+  
+      // Select the first video device (which is usually the laptop's main camera)
+      const laptopCamera = videoDevices.length > 0 ? videoDevices[0].deviceId : null;
+  
+      if (!laptopCamera) {
+        console.error("No camera found!");
+        return;
       }
-    })
-    .catch(err => console.error("Error accessing camera:", err));
+  
+      navigator.mediaDevices.getUserMedia({
+        video: { deviceId: { exact: laptopCamera } },
+        audio: true
+      })
+      .then((userStream) => {
+        setStream(userStream);
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = userStream;
+        }
+        if (peerRef.current) {
+          userStream.getTracks().forEach(track => peerRef.current.addTrack(track, userStream));
+        }
+      })
+      .catch(err => console.error("Error accessing laptop camera:", err));
+    });
   };
+  
 
   const switchCamera = () => {
     const newCamera = currentCamera === "user" ? "environment" : "user";
     setCurrentCamera(newCamera);
-    getMediaStream();
+    getMediaStream(newCamera);
   };
 
   const createRoom = () => {
@@ -141,15 +158,18 @@ const VideoCall = () => {
           <p>Room Code: {roomId}</p>
           <div className="flex gap-4">
             <video ref={localVideoRef} autoPlay playsInline className="w-1/2 border border-gray-700" />
+            <video ref={remoteVideoRef} autoPlay playsInline className="w-1/2 border border-gray-700" />
           </div>
-          <div id="remote-videos" className="flex gap-4 mt-4"></div>
           <div className="mt-4 flex gap-4">
+            <button onClick={callUser} className="px-4 py-2 bg-red-500 rounded">
+              Start Call
+            </button>
             <button onClick={switchCamera} className="px-4 py-2 bg-yellow-500 rounded">
               Switch Camera
             </button>
-      </div>
+          </div>
         </>
-        )}
+      )}
     </div>
   );
 };
