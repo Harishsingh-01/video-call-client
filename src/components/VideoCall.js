@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
 
-const socket = io("https://barnes-occasions-kw-portfolio.trycloudflare.com"); // Use your Cloudflare URL
+const socket = io("https://video-call-server-hrml.onrender.com"); // Use your Cloudflare URL
 
 const VideoCall = () => {
   const localVideoRef = useRef(null);
