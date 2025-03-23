@@ -1,28 +1,43 @@
 import React, { useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
 
+// Initialize socket connection
 const socket = io("https://video-call-server-hrml.onrender.com");
 
 const VideoCall = () => {
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const peerRef = useRef(null);
+
   const [stream, setStream] = useState(null);
   const [roomId, setRoomId] = useState("");
   const [joinedRoom, setJoinedRoom] = useState(false);
   const [inputRoom, setInputRoom] = useState("");
+  const [currentCamera, setCurrentCamera] = useState("user");
   const [isConnected, setIsConnected] = useState(socket.connected);
 
   useEffect(() => {
-    socket.on("connect", () => setIsConnected(true));
-    socket.on("disconnect", () => setIsConnected(false));
-    return () => socket.disconnect();
+    socket.on("connect", () => {
+      console.log("Socket connected");
+      setIsConnected(true);
+    });
+
+    socket.on("disconnect", () => {
+      console.log("Socket disconnected");
+      setIsConnected(false);
+    });
+
+    return () => {
+      socket.disconnect();
+    };
   }, []);
 
   useEffect(() => {
     if (!roomId) return;
 
-    socket.on("room-joined", (data) => console.log("Joined room:", data));
+    socket.on("room-joined", (data) => {
+      console.log("Joined room:", data);
+    });
 
     socket.on("user-connected", (userId) => {
       console.log(`User ${userId} joined`);
@@ -31,6 +46,7 @@ const VideoCall = () => {
 
     socket.on("signal", async (data) => {
       console.log("Received signal:", data);
+
       if (!peerRef.current) {
         setupPeer();
         stream?.getTracks().forEach((track) => peerRef.current.addTrack(track, stream));
@@ -70,14 +86,7 @@ const VideoCall = () => {
 
   const setupPeer = () => {
     const peer = new RTCPeerConnection({
-      iceServers: [
-        { urls: "stun:stun.l.google.com:19302" }, // Free STUN server
-        {
-          urls: "turn:relay1.expressturn.com:3478",
-          username: "efW7ayV8vc62c",
-          credential: "oJ1Nq1hBf6j9A",
-        },
-      ],
+      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
     });
 
     peer.ontrack = (event) => {
@@ -106,14 +115,23 @@ const VideoCall = () => {
     socket.emit("signal", { room: roomId, type: "offer", offer });
   };
 
-  const getMediaStream = async () => {
-    try {
-      const userStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-      setStream(userStream);
-      if (localVideoRef.current) localVideoRef.current.srcObject = userStream;
-    } catch (err) {
-      console.error("Error accessing media devices:", err);
-    }
+  const getMediaStream = (facingMode = "user") => {
+    navigator.mediaDevices
+      .getUserMedia({ video: { facingMode }, audio: true })
+      .then((userStream) => {
+        setStream(userStream);
+        if (localVideoRef.current) localVideoRef.current.srcObject = userStream;
+        peerRef.current?.getSenders().forEach((sender) => peerRef.current.removeTrack(sender));
+        userStream.getTracks().forEach((track) => peerRef.current?.addTrack(track, userStream));
+      })
+      .catch((err) => console.error("Media error:", err));
+  };
+
+  const switchCamera = () => {
+    stream?.getTracks().forEach((track) => track.stop());
+    const newCamera = currentCamera === "user" ? "environment" : "user";
+    setCurrentCamera(newCamera);
+    getMediaStream(newCamera);
   };
 
   const createRoom = () => {
@@ -158,8 +176,19 @@ const VideoCall = () => {
         <>
           <p className="mb-4">Room Code: {roomId}</p>
           <div className="flex gap-4">
-            <video ref={localVideoRef} autoPlay playsInline muted className="w-80 h-60 border rounded bg-black" />
-            <video ref={remoteVideoRef} autoPlay playsInline className="w-80 h-60 border rounded bg-black" />
+            <div className="relative">
+              <video ref={localVideoRef} autoPlay playsInline muted className="w-80 h-60 border rounded bg-black" />
+              <span className="absolute bottom-2 left-2 bg-black bg-opacity-50 px-2 rounded">You</span>
+            </div>
+            <div className="relative">
+              <video ref={remoteVideoRef} autoPlay playsInline className="w-80 h-60 border rounded bg-black" />
+              <span className="absolute bottom-2 left-2 bg-black bg-opacity-50 px-2 rounded">Remote</span>
+            </div>
+          </div>
+          <div className="mt-4 flex gap-4">
+            <button onClick={switchCamera} className="px-4 py-2 bg-yellow-500 rounded hover:bg-yellow-600">
+              Switch Camera
+            </button>
           </div>
         </>
       )}
