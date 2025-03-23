@@ -20,19 +20,34 @@ const VideoCall = () => {
     });
 
     socket.on("signal", async (data) => {
-      if (!peerRef.current) setupPeer();
-
-      if (data.type === "offer") {
-        await peerRef.current.setRemoteDescription(new RTCSessionDescription(data.offer));
-        const answer = await peerRef.current.createAnswer();
-        await peerRef.current.setLocalDescription(answer);
-        socket.emit("signal", { room: roomId, answer });
-      } else if (data.type === "answer") {
-        await peerRef.current.setRemoteDescription(new RTCSessionDescription(data.answer));
-      } else if (data.candidate) {
-        await peerRef.current.addIceCandidate(new RTCIceCandidate(data.candidate));
-      }
-    });
+        if (!peerRef.current) setupPeer(); // Ensure peer connection is initialized
+      
+        try {
+          if (data.type === "offer") {
+            console.log("Received Offer:", data.offer.sdp);
+            
+            // Ensure correct media line order
+            if (peerRef.current.signalingState !== "stable") {
+              console.warn("Ignoring offer as signaling state is not stable:", peerRef.current.signalingState);
+              return;
+            }
+      
+            await peerRef.current.setRemoteDescription(new RTCSessionDescription(data.offer));
+            const answer = await peerRef.current.createAnswer();
+            await peerRef.current.setLocalDescription(answer);
+            socket.emit("signal", { room: roomId, answer });
+          } 
+          else if (data.type === "answer") {
+            await peerRef.current.setRemoteDescription(new RTCSessionDescription(data.answer));
+          } 
+          else if (data.candidate) {
+            await peerRef.current.addIceCandidate(new RTCIceCandidate(data.candidate));
+          }
+        } catch (error) {
+          console.error("Error handling WebRTC signal:", error);
+        }
+      });
+      
 
     return () => {
       socket.disconnect();
@@ -67,23 +82,35 @@ const VideoCall = () => {
 
     socket.emit("signal", { room: roomId, offer });
   };
-
-  const getMediaStream = (facingMode = "user") => {
-    navigator.mediaDevices.getUserMedia({ 
-      video: { facingMode }, 
-      audio: true 
-    })
-    .then((userStream) => {
-      setStream(userStream);
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = userStream;
+  const getMediaStream = () => {
+    navigator.mediaDevices.enumerateDevices().then((devices) => {
+      const videoDevices = devices.filter(device => device.kind === "videoinput");
+  
+      // Select the first video device (which is usually the laptop's main camera)
+      const laptopCamera = videoDevices.length > 0 ? videoDevices[0].deviceId : null;
+  
+      if (!laptopCamera) {
+        console.error("No camera found!");
+        return;
       }
-      if (peerRef.current) {
-        userStream.getTracks().forEach((track) => peerRef.current.addTrack(track, userStream));
-      }
-    })
-    .catch((err) => console.error("Error accessing media devices:", err));
+  
+      navigator.mediaDevices.getUserMedia({
+        video: { deviceId: { exact: laptopCamera } },
+        audio: true
+      })
+      .then((userStream) => {
+        setStream(userStream);
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = userStream;
+        }
+        if (peerRef.current) {
+          userStream.getTracks().forEach(track => peerRef.current.addTrack(track, userStream));
+        }
+      })
+      .catch(err => console.error("Error accessing laptop camera:", err));
+    });
   };
+  
 
   const switchCamera = () => {
     const newCamera = currentCamera === "user" ? "environment" : "user";
