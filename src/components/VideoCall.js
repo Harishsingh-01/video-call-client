@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
 
-const socket = io("https://video-call-server-hrml.onrender.com"); // Your Cloudflare URL
+const socket = io("https://barnes-occasions-kw-portfolio.trycloudflare.com"); // Use your Cloudflare URL
 
 const VideoCall = () => {
   const localVideoRef = useRef(null);
@@ -11,28 +11,25 @@ const VideoCall = () => {
   const [roomId, setRoomId] = useState("");
   const [joinedRoom, setJoinedRoom] = useState(false);
   const [inputRoom, setInputRoom] = useState("");
-  const [currentCamera, setCurrentCamera] = useState("user");
+  const [currentCamera, setCurrentCamera] = useState("user"); // Default: Front Camera
 
   useEffect(() => {
     socket.on("user-connected", (userId) => {
       console.log(`User ${userId} joined the room`);
-      startCall();
+      callUser(userId);
     });
 
     socket.on("signal", async (data) => {
       if (!peerRef.current) setupPeer();
 
       if (data.type === "offer") {
-        console.log("Received offer from remote peer.");
         await peerRef.current.setRemoteDescription(new RTCSessionDescription(data.offer));
         const answer = await peerRef.current.createAnswer();
         await peerRef.current.setLocalDescription(answer);
         socket.emit("signal", { room: roomId, answer });
       } else if (data.type === "answer") {
-        console.log("Received answer from remote peer.");
         await peerRef.current.setRemoteDescription(new RTCSessionDescription(data.answer));
       } else if (data.candidate) {
-        console.log("Received ICE candidate.");
         await peerRef.current.addIceCandidate(new RTCIceCandidate(data.candidate));
       }
     });
@@ -62,13 +59,12 @@ const VideoCall = () => {
     peerRef.current = peer;
   };
 
-  const startCall = async () => {
+  const callUser = async (userId) => {
     if (!peerRef.current) setupPeer();
 
     const offer = await peerRef.current.createOffer();
     await peerRef.current.setLocalDescription(offer);
 
-    console.log("Sending offer to the second user.");
     socket.emit("signal", { room: roomId, offer });
   };
 
@@ -138,7 +134,7 @@ const VideoCall = () => {
             <video ref={remoteVideoRef} autoPlay playsInline className="w-1/2 border border-gray-700" />
           </div>
           <div className="mt-4 flex gap-4">
-            <button onClick={startCall} className="px-4 py-2 bg-red-500 rounded">
+            <button onClick={callUser} className="px-4 py-2 bg-red-500 rounded">
               Start Call
             </button>
             <button onClick={switchCamera} className="px-4 py-2 bg-yellow-500 rounded">
