@@ -17,10 +17,10 @@ const VideoCall = () => {
   const [inputRoom, setInputRoom] = useState("");
   const [currentCamera, setCurrentCamera] = useState("user"); // "user" for front camera, "environment" for back camera
 
-  // Split the socket connection handling into a separate useEffect
+  // Handle socket connections and signaling
   useEffect(() => {
-    console.log('Initial socket setup');
-    
+    console.log('Socket connection status:', socket.connected);
+
     socket.on("connect", () => {
       console.log("Socket connected successfully");
     });
@@ -28,19 +28,6 @@ const VideoCall = () => {
     socket.on("connect_error", (error) => {
       console.error("Socket connection error:", error);
     });
-
-    // Cleanup only on component unmount
-    return () => {
-      console.log("Component unmounting, cleaning up socket...");
-      socket.disconnect();
-    };
-  }, []); // Empty dependency array
-
-  // Handle room-specific socket events
-  useEffect(() => {
-    if (!roomId) return; // Don't set up room handlers if no roomId
-
-    console.log(`Setting up room handlers for room: ${roomId}`);
 
     socket.on("user-connected", (userId) => {
       console.log(`User ${userId} joined the room. Initiating call...`);
@@ -83,11 +70,10 @@ const VideoCall = () => {
       }
     });
 
-    // Cleanup only room-specific handlers
+    // Cleanup on unmount
     return () => {
-      console.log(`Cleaning up room handlers for room: ${roomId}`);
-      socket.off("user-connected");
-      socket.off("signal");
+      console.log("Cleaning up socket connection...");
+      socket.disconnect();
     };
   }, [roomId]);
 
@@ -194,38 +180,22 @@ const VideoCall = () => {
     getMediaStream(newCamera);
   };
 
-  // Update createRoom function
+  // Create a new room
   const createRoom = () => {
     const newRoomId = Math.random().toString(36).substring(2, 10);
     console.log("Creating new room:", newRoomId);
-    
-    // Make sure we're connected before creating room
-    if (!socket.connected) {
-      console.log("Reconnecting socket...");
-      socket.connect();
-    }
-    
     setRoomId(newRoomId);
     socket.emit("join-room", newRoomId);
-    console.log("Emitted join-room event");
     setJoinedRoom(true);
     getMediaStream();
   };
 
-  // Update joinRoom function
+  // Join an existing room
   const joinRoom = () => {
     if (inputRoom) {
       console.log("Joining room:", inputRoom);
-      
-      // Make sure we're connected before joining room
-      if (!socket.connected) {
-        console.log("Reconnecting socket...");
-        socket.connect();
-      }
-      
       setRoomId(inputRoom);
       socket.emit("join-room", inputRoom);
-      console.log("Emitted join-room event");
       setJoinedRoom(true);
       getMediaStream();
     } else {
@@ -234,38 +204,8 @@ const VideoCall = () => {
     }
   };
 
-  // Add connection status display
-  const [isConnected, setIsConnected] = useState(socket.connected);
-
-  useEffect(() => {
-    const handleConnect = () => {
-      console.log('Socket connected');
-      setIsConnected(true);
-    };
-
-    const handleDisconnect = () => {
-      console.log('Socket disconnected');
-      setIsConnected(false);
-    };
-
-    socket.on('connect', handleConnect);
-    socket.on('disconnect', handleDisconnect);
-
-    return () => {
-      socket.off('connect', handleConnect);
-      socket.off('disconnect', handleDisconnect);
-    };
-  }, []);
-
   return (
     <div className="flex flex-col items-center justify-center h-screen bg-gray-900 text-white">
-      {/* Add connection status indicator */}
-      <div className={`fixed top-4 right-4 px-3 py-1 rounded ${
-        isConnected ? 'bg-green-500' : 'bg-red-500'
-      }`}>
-        {isConnected ? 'Connected' : 'Disconnected'}
-      </div>
-
       {!joinedRoom ? (
         <div className="flex flex-col gap-4">
           <button onClick={createRoom} className="px-4 py-2 bg-blue-500 rounded hover:bg-blue-600">
